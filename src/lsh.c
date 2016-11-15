@@ -29,7 +29,11 @@
 #include <sys/wait.h>
 
 // Constants
-static const char WHEREIS_PATH[] = "/usr/bin/whereis -b ";
+static const char WHEREIS_PATH[] = "/usr/bin/whereis -b -B ";
+
+// Globals
+char *PATH;
+
 
 /*
  * Function declarations
@@ -39,9 +43,11 @@ void PrintCommand(int, Command *);
 void PrintPgm(Pgm *);
 void stripwhite(char *);
 
-// Student defined
-void InterpretCommand(Command * const cmd);
+// Forward declarations
+char *InterpretCommand(const Command cmd);
 char *GetCommandPath(const char *binaryFile);
+void ParsePath();
+char *RunCommands(Pgm *pgm, int isBackgroundProcess);
 
 /* When non-zero, this global means the user is done using this program. */
 int done = 0;
@@ -56,6 +62,9 @@ int main(void)
 {
     Command cmd;
     int n;
+
+    // Load PATH variable with whitespace separation
+    ParsePath();    
 
     while (!done) 
     {
@@ -81,10 +90,11 @@ int main(void)
                 add_history(line);
                 /* execute it */
                 n = parse(line, &cmd);
-                PrintCommand(n, &cmd);
 
-                // InterpretCommand(&cmd);
-                char *commandPath  = GetCommandPath("ls");                
+               // PrintCommand(n, &cmd);
+
+                // Run commands
+                RunCommands(cmd.pgm, cmd.bakground);
             }
         }
 
@@ -97,24 +107,51 @@ int main(void)
     return 0;
 }
 
-
-
-void InterpretCommand(Command * const cmd)
+/*
+ * Name: RunCommands
+ *
+ * RECURSIVE
+ *
+ * Description: Navigate through the Command structure and execute
+ *
+ */
+char *RunCommands(Pgm *pgm, int isBackgroundProcess)
 {
-   /* char **pl = cmd->pgm->pgmlist;
-
-    printf("Blah: %s\n", *pl);
+    char *path = GetCommandPath(pgm->pgmlist[0]);
 
     int pid = fork();
 
     if(pid == 0)
     {
-        execlp("/bin", *pl, NULL);
+        execv(path, pgm->pgmlist);
     }
-    else 
+    else
     {
-        wait(NULL);
-    }*/
+        if(isBackgroundProcess == 0)
+        {            
+            wait(NULL);
+        }
+    }
+}
+
+
+char *InterpretCommand(const Command cmd)
+{
+    const int bufferSize = 256;
+    char *commandString = malloc(sizeof(char) * bufferSize);
+    
+    char *command = cmd.pgm->pgmlist[0];
+
+    // Get the command's path
+    //strcpy(commandString, GetCommandPath(command));     
+
+    //printf("cmd: %s", GetCommandPath(command));
+
+    // EMMANUEL AND MATHIAS BWARE!! THIS IS THE FIRST COMMAND ONLY!
+    //strcat(commandString, command);
+
+
+    return command;       
 }
 
 /*
@@ -125,22 +162,26 @@ void InterpretCommand(Command * const cmd)
  */
 char *GetCommandPath(const char *binaryFile)
 {
-    const int bufferSize = 128;
+    const int bufferSize = 256;
 
     FILE *binPipe;
-    char *path = malloc(sizeof(char) * bufferSize); //[bufferSize];
+    char *path = malloc(sizeof(char) * bufferSize); 
     char whereIsCommand[bufferSize];
     
     // Add whereis to command
     strcpy(whereIsCommand, WHEREIS_PATH);
 
+    // Append the PATH
+    strcat(whereIsCommand, PATH);
+
+    // Append flag
+    strcat(whereIsCommand, " -f ");
+
     // Add the binary file to search
     strcat(whereIsCommand, binaryFile);
 
     // End the string 
-    strcat(whereIsCommand, "\0");
-
-//    printf("command: %s\n", whereIsCommand);
+    //strcat(whereIsCommand, "\0");
 
     // Open a pipe and run the command in read mode
     binPipe = popen(whereIsCommand, "r");
@@ -172,8 +213,42 @@ char *GetCommandPath(const char *binaryFile)
         return NULL;
     }
     
+    // Get rid of new line and replace with ' '
+    ptr = strstr(path, "\n");    
+    *ptr = '\0';
+
     // Finally return binary's path
     return path;
+}
+
+
+/*
+ * Name: ParsePath
+ *
+ * Description: Gets environment path, removes ':' and writes ' ' instead
+ *
+ */
+void ParsePath()
+{
+    char *tempPath = getenv("PATH");
+    char *ptr;
+
+    // While there are occurences of ':', write ' '
+    while(1)
+    {        
+        ptr = strstr(tempPath, ":");
+
+        if(ptr == NULL)
+            break;
+
+        *ptr = ' ';
+    }
+     
+    /*ptr = strstr(tempPath, "\0");
+
+    memmove(ptr, ptr + 1, strlen(tempPath));*/
+
+    PATH = tempPath;    
 }
 
 
