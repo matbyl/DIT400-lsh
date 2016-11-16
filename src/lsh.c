@@ -1,8 +1,8 @@
-/* 
+/*
  * Main source code file for lsh shell program
  *
  * You are free to add functions to this file.
- * If you want to add functions in a separate file 
+ * If you want to add functions in a separate file
  * you will need to modify Makefile to compile
  * your additional functions.
  *
@@ -10,10 +10,10 @@
  * easier for us while grading your assignment.
  *
  * Submit the entire lab1 folder as a tar archive (.tgz).
- * Command to create submission archive: 
+ * Command to create submission archive:
       $> tar cvf lab1.tgz lab1/
  *
- * All the best 
+ * All the best
  */
 
 
@@ -23,7 +23,7 @@
 #include <readline/history.h>
 #include "parse.h"
 
-// Student 
+// Student
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -68,19 +68,19 @@ int main(void)
     int n;
 
     // Load PATH variable with whitespace separation
-    ParsePath();    
+    ParsePath();
 
-    while (!done) 
+    while (!done)
     {
         char *line;
         line = readline("> ");
 
-        if (!line) 
+        if (!line)
         {
             /* Encountered EOF at top level */
             done = 1;
         }
-        else 
+        else
         {
             /*
             * Remove leading and trailing whitespace from the line
@@ -89,7 +89,7 @@ int main(void)
             */
             stripwhite(line);
 
-            if(*line) 
+            if(*line)
             {
                 add_history(line);
                 /* execute it */
@@ -98,13 +98,13 @@ int main(void)
                // PrintCommand(n, &cmd);
 
                 // Run commands
-                RunCommands(cmd.pgm, cmd.background);
+                //RunCommands(cmd.pgm, cmd.background);
 
-                //InterpretCommand(cmd);
+                InterpretCommand(cmd);
             }
         }
 
-        if(line) 
+        if(line)
         {
             free(line);
         }
@@ -123,7 +123,7 @@ void PipeCommands(Pgm *pgm, int isRoot, int isBackground)
 
 
     if(isRoot)
-    {        
+    {
 
         if(pid < 0)
         {
@@ -131,13 +131,17 @@ void PipeCommands(Pgm *pgm, int isRoot, int isBackground)
         }
         else if(pid == 0)
         {
-            execv(path, pgm->pgmlist);            
+            execv(path, pgm->pgmlist);
         }
         else
-        { 
-            //if(isBackground == 0)
-                wait(NULL);                
-                exit(0);
+        {
+            if(!isBackground)
+              wait(NULL);
+            else
+            {
+                exit(pid);
+            }
+            
         }
     }
     else
@@ -155,7 +159,7 @@ void InterpretCommand(const Command cmd)
 
     if(pid == 0)
     {*/
-    
+
     if(cmd.background == 1)
     {
         pid_t pid = fork();
@@ -166,22 +170,21 @@ void InterpretCommand(const Command cmd)
         }
         else if(pid == 0)
         {
-            PipeCommands(cmd.pgm, 1, cmd.background);     
+            PipeCommands(cmd.pgm, 1, cmd.background);
         }
         else
         {
             wait(NULL);
-            exit(0);
-        }        
+        }
     }
     else
     {
-        PipeCommands(cmd.pgm, 1, cmd.background);        
+        PipeCommands(cmd.pgm, 1, cmd.background);
     }
-    
 
 
-    
+
+
 }
 
 /*
@@ -195,9 +198,9 @@ char *GetCommandPath(const char *binaryFile)
     const int bufferSize = 256;
 
     FILE *binPipe;
-    char *path = malloc(sizeof(char) * bufferSize); 
+    char *path = malloc(sizeof(char) * bufferSize);
     char whereIsCommand[bufferSize];
-    
+
     // Add whereis to command
     strcpy(whereIsCommand, WHEREIS_PATH);
 
@@ -210,7 +213,7 @@ char *GetCommandPath(const char *binaryFile)
     // Add the binary file to search
     strcat(whereIsCommand, binaryFile);
 
-    // End the string 
+    // End the string
     //strcat(whereIsCommand, "\0");
 
     // Open a pipe and run the command in read mode
@@ -242,9 +245,9 @@ char *GetCommandPath(const char *binaryFile)
         printf("Failed to run command\n");
         return NULL;
     }
-    
+
     // Get rid of new line and replace with ' '
-    ptr = strstr(path, "\n");    
+    ptr = strstr(path, "\n");
     *ptr = '\0';
 
     // Finally return binary's path
@@ -265,7 +268,7 @@ void ParsePath()
 
     // While there are occurences of ':', write ' '
     while(1)
-    {        
+    {
         ptr = strstr(tempPath, ":");
 
         if(ptr == NULL)
@@ -273,12 +276,12 @@ void ParsePath()
 
         *ptr = ' ';
     }
-     
+
     /*ptr = strstr(tempPath, "\0");
 
     memmove(ptr, ptr + 1, strlen(tempPath));*/
 
-    PATH = tempPath;    
+    PATH = tempPath;
 }
 
 
@@ -303,7 +306,7 @@ char *RunCommands(Pgm *pgm, int isBackgroundProcess)
     else
     {
         if(isBackgroundProcess == 0)
-        {            
+        {
             wait(NULL);
         }
     }
@@ -333,11 +336,11 @@ void PrintCommand (int n, Command *cmd)
  */
 void PrintPgm (Pgm *p)
 {
-    if (p == NULL) 
+    if (p == NULL)
     {
         return;
     }
-    else 
+    else
     {
         char **pl = p->pgmlist;
 
@@ -347,7 +350,7 @@ void PrintPgm (Pgm *p)
         PrintPgm(p->next);
         printf("    [");
 
-        while (*pl) 
+        while (*pl)
         {
             printf("%s ", *pl++);
         }
@@ -365,19 +368,19 @@ void stripwhite (char *string)
 {
     register int i = 0;
 
-    while (isspace( string[i] )) 
+    while (isspace( string[i] ))
     {
       i++;
     }
 
-    if (i) 
+    if (i)
     {
         strcpy (string, string + i);
     }
 
     i = strlen( string ) - 1;
-    
-    while (i> 0 && isspace (string[i])) 
+
+    while (i> 0 && isspace (string[i]))
     {
         i--;
     }
