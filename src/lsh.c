@@ -44,10 +44,14 @@ void PrintPgm(Pgm *);
 void stripwhite(char *);
 
 // Forward declarations
-char *InterpretCommand(const Command cmd);
+void InterpretCommand(const Command cmd);
 char *GetCommandPath(const char *binaryFile);
 void ParsePath();
 char *RunCommands(Pgm *pgm, int isBackgroundProcess);
+
+
+void PipeCommands(Pgm *pgm, int isRoot, int isBackground);
+
 
 /* When non-zero, this global means the user is done using this program. */
 int done = 0;
@@ -94,7 +98,9 @@ int main(void)
                // PrintCommand(n, &cmd);
 
                 // Run commands
-                RunCommands(cmd.pgm, cmd.bakground);
+                RunCommands(cmd.pgm, cmd.background);
+
+                //InterpretCommand(cmd);
             }
         }
 
@@ -107,51 +113,75 @@ int main(void)
     return 0;
 }
 
-/*
- * Name: RunCommands
- *
- * RECURSIVE
- *
- * Description: Navigate through the Command structure and execute
- *
- */
-char *RunCommands(Pgm *pgm, int isBackgroundProcess)
+
+
+void PipeCommands(Pgm *pgm, int isRoot, int isBackground)
 {
     char *path = GetCommandPath(pgm->pgmlist[0]);
 
-    int pid = fork();
+    pid_t pid = fork();
 
-    if(pid == 0)
-    {
-        execv(path, pgm->pgmlist);
+
+    if(isRoot)
+    {        
+
+        if(pid < 0)
+        {
+            printf("AAH DOUCHEBAG!!");
+        }
+        else if(pid == 0)
+        {
+            execv(path, pgm->pgmlist);            
+        }
+        else
+        { 
+            //if(isBackground == 0)
+                wait(NULL);                
+                exit(0);
+        }
     }
     else
     {
-        if(isBackgroundProcess == 0)
-        {            
-            wait(NULL);
-        }
+
     }
 }
 
 
-char *InterpretCommand(const Command cmd)
+
+
+void InterpretCommand(const Command cmd)
 {
-    const int bufferSize = 256;
-    char *commandString = malloc(sizeof(char) * bufferSize);
+    /*pid_t pid = fork();
+
+    if(pid == 0)
+    {*/
     
-    char *command = cmd.pgm->pgmlist[0];
+    if(cmd.background == 1)
+    {
+        pid_t pid = fork();
 
-    // Get the command's path
-    //strcpy(commandString, GetCommandPath(command));     
+        if(pid < 0)
+        {
+            printf("AAH DOUCHEBAG!!");
+        }
+        else if(pid == 0)
+        {
+            PipeCommands(cmd.pgm, 1, cmd.background);     
+        }
+        else
+        {
+            wait(NULL);
+            exit(0);
+        }        
+    }
+    else
+    {
+        PipeCommands(cmd.pgm, 1, cmd.background);        
+    }
+    
 
-    //printf("cmd: %s", GetCommandPath(command));
 
-    // EMMANUEL AND MATHIAS BWARE!! THIS IS THE FIRST COMMAND ONLY!
-    //strcat(commandString, command);
-
-
-    return command;       
+    
 }
 
 /*
@@ -253,6 +283,34 @@ void ParsePath()
 
 
 /*
+ * Name: RunCommands
+ *
+ * RECURSIVE
+ *
+ * Description: Navigate through the Command structure and execute
+ *
+ */
+char *RunCommands(Pgm *pgm, int isBackgroundProcess)
+{
+    char *path = GetCommandPath(pgm->pgmlist[0]);
+
+    int pid = fork();
+
+    if(pid == 0)
+    {
+        execv(path, pgm->pgmlist);
+    }
+    else
+    {
+        if(isBackgroundProcess == 0)
+        {            
+            wait(NULL);
+        }
+    }
+}
+
+
+/*
  * Name: PrintCommand
  *
  * Description: Prints a Command structure as returned by parse on stdout.
@@ -263,7 +321,7 @@ void PrintCommand (int n, Command *cmd)
     printf("Parse returned %d:\n", n);
     printf("   stdin : %s\n", cmd->rstdin  ? cmd->rstdin  : "<none>" );
     printf("   stdout: %s\n", cmd->rstdout ? cmd->rstdout : "<none>" );
-    printf("   bg    : %s\n", cmd->bakground ? "yes" : "no");
+    printf("   bg    : %s\n", cmd->background ? "yes" : "no");
     PrintPgm(cmd->pgm);
 }
 
