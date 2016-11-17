@@ -139,7 +139,7 @@ void PipeCommands(Pgm *pgm, int isRoot, int isBackground)
               wait(NULL);
             else
             {
-                exit(pid);
+                exit(0);
             }
             
         }
