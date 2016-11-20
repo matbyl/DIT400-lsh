@@ -30,6 +30,9 @@
 
 // Constants
 static const char WHEREIS_PATH[] = "/usr/bin/whereis -b -B ";
+#define READ_END 0
+#define WRITE_END 1
+#define BUFFER_SIZE 2048
 
 // Globals
 char *PATH;
@@ -50,7 +53,7 @@ void ParsePath();
 char *RunCommands(Pgm *pgm, int isBackgroundProcess);
 
 
-void PipeCommands(Pgm *pgm, int isRoot, int isBackground);
+int PipeCommands(Pgm *pgm, int isRoot, int isBackground);
 
 
 /* When non-zero, this global means the user is done using this program. */
@@ -113,77 +116,139 @@ int main(void)
     return 0;
 }
 
+// Pipe data (global)
+int pipeData[2];
 
-
-void PipeCommands(Pgm *pgm, int isRoot, int isBackground)
+int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
 {
     char *path = GetCommandPath(pgm->pgmlist[0]);
+    pid_t pid;
 
-    pid_t pid = fork();
+    Pgm *nextCommand = pgm->next;
 
-
-    if(isRoot)
+    if(nextCommand != NULL)
     {
+        PipeCommands(nextCommand, 0, isBackground);
 
-        if(pid < 0)
+        close(pipeData[WRITE_END]);
+        dup2(pipeData[READ_END], 0);
+
+        pipe(pipeData);
+
+        pid = fork();
+
+        if(pid == 0)
         {
-            printf("AAH DOUCHEBAG!!");
-        }
-        else if(pid == 0)
-        {
-            execv(path, pgm->pgmlist);
-        }
-        else
-        {
-            if(!isBackground)
-              wait(NULL);
-            else
+
+            if(!isRoot)
             {
-                exit(0);
+                dup2(pipeData[WRITE_END], 1);
+                close(pipeData[WRITE_END]);
             }
-            
-        }
-    }
-    else
-    {
 
-    }
-}
+            execv(path, pgm->pgmlist);
 
-
-
-
-void InterpretCommand(const Command cmd)
-{
-    /*pid_t pid = fork();
-
-    if(pid == 0)
-    {*/
-
-    if(cmd.background == 1)
-    {
-        pid_t pid = fork();
-
-        if(pid < 0)
-        {
-            printf("AAH DOUCHEBAG!!");
-        }
-        else if(pid == 0)
-        {
-            PipeCommands(cmd.pgm, 1, cmd.background);
         }
         else
         {
+            close(pipeData[WRITE_END]);
+            close(pipeData[READ_END]);
             wait(NULL);
         }
     }
     else
     {
-        PipeCommands(cmd.pgm, 1, cmd.background);
+        pipe(pipeData);
+
+        pid = fork();
+
+        if(pid == 0)
+        {
+            //close(0);
+            dup2(pipeData[WRITE_END], 1);
+            execv(path, pgm->pgmlist);
+        }
     }
 
 
+    if(isRoot)
+    {
+        if(!isBackground)
+        {
+            wait(NULL);
+        }
+        else
+        {
+            exit(0);
+        }
+    }
 
+
+}
+
+
+
+void InterpretCommand(const Command cmd)
+{
+    Pgm *pgm = cmd.pgm;
+    pid_t pid;
+
+    // Check if it's a single command
+    if(pgm->next == NULL)
+    {
+        // create new process to handle the binary execution
+        pid = fork();
+
+        // check for child
+        if(pid == 0)
+        {
+            // If command is a background one, create yet another process to keep the main
+            // process lsh from waiting
+            if(cmd.background == 1)
+            {
+                // Make grandchild process run the command
+                if(pid = fork() == 0)
+                {
+                    execv(GetCommandPath(pgm->pgmlist[0]), pgm->pgmlist);
+                }
+                else
+                {
+                    exit(0);
+                }
+            }
+            else
+            {
+                // If it is not running in the background we just execute it in the child process
+                execv(GetCommandPath(pgm->pgmlist[0]), pgm->pgmlist);
+            }
+        }
+        else
+        {
+            // wait for all the child processes to finish
+            wait(NULL);
+        }
+    }
+    else
+    {
+        if(cmd.background == 1)
+        {
+            pid_t pid = fork();
+
+            if(pid == 0)
+            {
+
+                PipeCommands(cmd.pgm, 1, cmd.background);
+            }
+            else
+            {
+                wait(NULL);
+            }
+        }
+        else
+        {
+            PipeCommands(cmd.pgm, 1, cmd.background);
+        }
+    }
 
 }
 
@@ -293,7 +358,7 @@ void ParsePath()
  * Description: Navigate through the Command structure and execute
  *
  */
-char *RunCommands(Pgm *pgm, int isBackgroundProcess)
+char *RunSingleCommand(Pgm *pgm, int isBackgroundProcess)
 {
     char *path = GetCommandPath(pgm->pgmlist[0]);
 
