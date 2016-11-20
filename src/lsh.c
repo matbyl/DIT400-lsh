@@ -53,7 +53,7 @@ void ParsePath();
 char *RunCommands(Pgm *pgm, int isBackgroundProcess);
 
 
-void PipeCommands(Pgm *pgm, int isRoot, int isBackground);
+int PipeCommands(Pgm *pgm, int isRoot, int isBackground);
 
 
 /* When non-zero, this global means the user is done using this program. */
@@ -119,24 +119,33 @@ int main(void)
 // Pipe data (global)
 int pipeData[2];
 
-void PipeCommands(Pgm *pgm, int isRoot, int isBackground)
+int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
 {
     char *path = GetCommandPath(pgm->pgmlist[0]);    
-    pid_t pid;
+    pid_t pid;    
 
     Pgm *nextCommand = pgm->next;
 
     if(nextCommand != NULL)
     {
         PipeCommands(nextCommand, 0, isBackground);
+        
+        close(pipeData[WRITE_END]);
+        dup2(pipeData[READ_END], 0);
+
+        pipe(pipeData);
 
         pid = fork();
 
         if(pid == 0)
         {
-            close(pipeData[WRITE_END]);
-            dup2(pipeData[READ_END], 0);
-            
+
+            if(!isRoot)
+            {
+                dup2(pipeData[WRITE_END], 1);
+                close(pipeData[WRITE_END]);
+            }            
+
             execv(path, pgm->pgmlist);
 
         }
@@ -155,7 +164,7 @@ void PipeCommands(Pgm *pgm, int isRoot, int isBackground)
 
         if(pid == 0)
         {    
-            close(0);       
+            //close(0);       
             dup2(pipeData[WRITE_END], 1);
             execv(path, pgm->pgmlist);
         }
