@@ -139,20 +139,16 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
 
         if(pid == 0)
         {
-
             if(!isRoot)
             {
-                dup2(pipeData[WRITE_END], 1);
-                close(pipeData[WRITE_END]);
+                close(pipeData[READ_END]);                
+                dup2(pipeData[WRITE_END], 1);                
             }            
 
             execv(path, pgm->pgmlist);
-
         }
         else
-        {
-            close(pipeData[WRITE_END]);
-            close(pipeData[READ_END]);
+        {            
             wait(NULL);
         }
     }
@@ -168,22 +164,17 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
             dup2(pipeData[WRITE_END], 1);
             execv(path, pgm->pgmlist);
         }
-    }
-
-
-    if(isRoot)
-    {
-        if(!isBackground)
+        else
         {
             wait(NULL);
         }
-        else
-        {
-            exit(0);
-        }
     }
 
-
+    if(isRoot)
+    {
+        wait(NULL);
+        exit(0);
+    }
 }
 
 
@@ -229,27 +220,18 @@ void InterpretCommand(const Command cmd)
         }        
     }
     else 
-    {
-        if(cmd.background == 1)
-        {   
-            pid_t pid = fork();
+    {         
+        pid_t pid = fork();
 
-            if(pid == 0)
-            {
-                
-                PipeCommands(cmd.pgm, 1, cmd.background);
-            }
-            else
-            {
-                wait(NULL);
-            }    
+        if(pid == 0)
+        {            
+            PipeCommands(cmd.pgm, 1, cmd.background);
         }
         else
         {
-            PipeCommands(cmd.pgm, 1, cmd.background);
-        }
-    }
-    
+            wait(NULL);
+        }           
+    }    
 }
 
 /*
