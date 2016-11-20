@@ -8,7 +8,7 @@ SRCS=	parse.c lsh.c
 OBJS=	parse.o lsh.o
 
 CC=	gcc
-CFLAGS= -g 
+CFLAGS= -g
 ## Turn on this for more warnings:
 #CFLAGS= -g -Wall -pedantic
 LIBS= -lreadline -ltermcap

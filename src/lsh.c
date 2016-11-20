@@ -27,6 +27,9 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 // Constants
 static const char WHEREIS_PATH[] = "/usr/bin/whereis -b -B ";
@@ -36,6 +39,9 @@ static const char WHEREIS_PATH[] = "/usr/bin/whereis -b -B ";
 
 // Globals
 char *PATH;
+
+int MAIN_PROCESS;
+int CURRENT_PROCESS;
 
 
 /*
@@ -51,13 +57,16 @@ void InterpretCommand(const Command cmd);
 char *GetCommandPath(const char *binaryFile);
 void ParsePath();
 char *RunCommands(Pgm *pgm, int isBackgroundProcess);
-
-
 int PipeCommands(Pgm *pgm, int isRoot, int isBackground);
+void InteruptHandler(int signal);
 
 
 /* When non-zero, this global means the user is done using this program. */
 int done = 0;
+
+/* Default in- and output of a command */
+int INPUT_FD = 0;
+int OUTPUT_FD = 1;
 
 /*
  * Name: main
@@ -69,6 +78,9 @@ int main(void)
 {
     Command cmd;
     int n;
+
+    MAIN_PROCESS = getpid();
+    signal(SIGINT, InteruptHandler);
 
     // Load PATH variable with whitespace separation
     ParsePath();
@@ -140,20 +152,20 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
         if(pid == 0)
         {
 
-            if(!isRoot)
-            {
-                dup2(pipeData[WRITE_END], 1);
-                close(pipeData[WRITE_END]);
-            }
+          if(!isRoot)
+          {
+              close(pipeData[READ_END]);
+              dup2(pipeData[WRITE_END], 1);
+          }
+          else {
+              dup2(OUTPUT_FD, 1);
+          }
 
-            execv(path, pgm->pgmlist);
-
+          execv(path, pgm->pgmlist);
         }
-        else
+        else if(pid > 0)
         {
-            close(pipeData[WRITE_END]);
-            close(pipeData[READ_END]);
-            wait(NULL);
+          wait(NULL);
         }
     }
     else
@@ -164,28 +176,23 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
 
         if(pid == 0)
         {
-            //close(0);
+            dup2(INPUT_FD, 0);
+            close(pipeData[READ_END]);
             dup2(pipeData[WRITE_END], 1);
             execv(path, pgm->pgmlist);
         }
-    }
-
-
-    if(isRoot)
-    {
-        if(!isBackground)
+        else
         {
             wait(NULL);
         }
-        else
-        {
-            exit(0);
-        }
     }
 
-
+    if(isRoot)
+    {
+      wait(NULL);
+      exit(0);
+    }
 }
-
 
 
 void InterpretCommand(const Command cmd)
@@ -193,8 +200,25 @@ void InterpretCommand(const Command cmd)
     Pgm *pgm = cmd.pgm;
     pid_t pid;
 
+    if(cmd.rstdout != NULL)
+      OUTPUT_FD = creat(cmd.rstdout, O_WRONLY);
+    if(cmd.rstdin != NULL)
+    {
+      mode_t mode = O_RDONLY;
+      INPUT_FD = open(cmd.rstdin, mode);
+    }
+
+
+    if(strstr(pgm->pgmlist[0], "cd") != NULL)
+    {
+      chdir(pgm->pgmlist[1]);
+    }
+    else if(strstr(pgm->pgmlist[0], "exit") != NULL)
+    {
+      exit(0);
+    }
     // Check if it's a single command
-    if(pgm->next == NULL)
+    else if(pgm->next == NULL)
     {
         // create new process to handle the binary execution
         pid = fork();
@@ -207,7 +231,7 @@ void InterpretCommand(const Command cmd)
             if(cmd.background == 1)
             {
                 // Make grandchild process run the command
-                if(pid = fork() == 0)
+                if((pid = fork()) == 0)
                 {
                     execv(GetCommandPath(pgm->pgmlist[0]), pgm->pgmlist);
                 }
@@ -218,6 +242,8 @@ void InterpretCommand(const Command cmd)
             }
             else
             {
+                dup2(INPUT_FD, 0);
+                dup2(OUTPUT_FD, 1);
                 // If it is not running in the background we just execute it in the child process
                 execv(GetCommandPath(pgm->pgmlist[0]), pgm->pgmlist);
             }
@@ -230,26 +256,21 @@ void InterpretCommand(const Command cmd)
     }
     else
     {
-        if(cmd.background == 1)
-        {
-            pid_t pid = fork();
+          pid_t pid = fork();
 
-            if(pid == 0)
-            {
+          if(pid == 0)
+          {
+              PipeCommands(cmd.pgm, 1, cmd.background);
+          }
+          else
+          {
+              wait(NULL);
+          }
+      }
 
-                PipeCommands(cmd.pgm, 1, cmd.background);
-            }
-            else
-            {
-                wait(NULL);
-            }
-        }
-        else
-        {
-            PipeCommands(cmd.pgm, 1, cmd.background);
-        }
-    }
-
+      // Reset Input and Output file descriptors
+      INPUT_FD = 0;
+      OUTPUT_FD = 1;
 }
 
 /*
@@ -375,6 +396,18 @@ char *RunSingleCommand(Pgm *pgm, int isBackgroundProcess)
             wait(NULL);
         }
     }
+}
+
+/*
+ * Name: InteruptHandler
+ *
+ * Description: Takes care of the ctrl+c command
+ *
+ */
+void InteruptHandler(int signal)
+{
+  if(getpid() != MAIN_PROCESS)
+    exit(0);
 }
 
 
