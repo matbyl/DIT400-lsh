@@ -43,7 +43,6 @@ char *PATH;
 int MAIN_PROCESS;
 int CURRENT_PROCESS;
 
-
 /*
  * Function declarations
  */
@@ -52,14 +51,12 @@ void PrintCommand(int, Command *);
 void PrintPgm(Pgm *);
 void stripwhite(char *);
 
-// Forward declarations
+// Student
 void InterpretCommand(const Command cmd);
 char *GetCommandPath(const char *binaryFile);
 void ParsePath();
-char *RunCommands(Pgm *pgm, int isBackgroundProcess);
 int PipeCommands(Pgm *pgm, int isRoot, int isBackground);
 void InteruptHandler(int signal);
-
 
 /* When non-zero, this global means the user is done using this program. */
 int done = 0;
@@ -110,11 +107,9 @@ int main(void)
                 /* execute it */
                 n = parse(line, &cmd);
 
-               // PrintCommand(n, &cmd);
+                // PrintCommand(n, &cmd);
 
-                // Run commands
-                //RunCommands(cmd.pgm, cmd.background);
-
+                // Interpret and execute the current set of commands
                 InterpretCommand(cmd);
             }
         }
@@ -128,94 +123,138 @@ int main(void)
     return 0;
 }
 
-// Pipe data (global)
+// Pipe data file descriptor (global)
 int pipeData[2];
 
+/*
+ * Name: PipeCommands
+ *
+ * Description: Recursive function used to execute several piped commands
+ *
+ */
 int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
 {
     char *path = GetCommandPath(pgm->pgmlist[0]);
     pid_t pid;
 
+    // Get next command in the list (if there is one)
     Pgm *nextCommand = pgm->next;
 
+    // Validate next command, and run recursive part if valid
     if(nextCommand != NULL)
     {
+        // Go one level deeper
         PipeCommands(nextCommand, 0, isBackground);
 
+        // We won't write to the pipe, close it
         close(pipeData[WRITE_END]);
+
+        // Substitute stdin for the read-end of the pipe
         dup2(pipeData[READ_END], 0);
 
+        // Create yet another pipe for communication with next command
         pipe(pipeData);
 
+        // Create child process to run next command
         pid = fork();
 
         if(pid == 0)
         {
+            // Check if this is not the original function call 
+            // This would mean that we still need to write to a pipe, not stdout
+            if(!isRoot)
+            {
+                // We won't read from this pipe, close that end
+                close(pipeData[READ_END]);
 
-          if(!isRoot)
-          {
-              close(pipeData[READ_END]);
-              dup2(pipeData[WRITE_END], 1);
-          }
-          else {
-              dup2(OUTPUT_FD, 1);
-          }
+                // Substitute writing end
+                dup2(pipeData[WRITE_END], 1);
+            }
+            // We are back from all recursive madness, this is the top level
+            else 
+            {
+                // Write to the output file if there is one
+                dup2(OUTPUT_FD, 1);
+            }
 
-          execv(path, pgm->pgmlist);
+            // Execute the command
+            execv(path, pgm->pgmlist);
         }
         else if(pid > 0)
         {
-          wait(NULL);
+            // Parent waits for the process
+            wait(NULL);
         }
     }
+    // This is the last command in the linked list
     else
     {
+        // Create a pipe to communicate with next command
         pipe(pipeData);
 
+        // Create piped, child process
         pid = fork();
 
+        // Child process will run the command
         if(pid == 0)
         {
+            // Redirect input to file stream if there is one
             dup2(INPUT_FD, 0);
+
+            // We don't need to read from pipe
             close(pipeData[READ_END]);
+
+            // Substitute stdout for the write-end of the pipe
             dup2(pipeData[WRITE_END], 1);
+
+            // Run the command and write output to pipe
             execv(path, pgm->pgmlist);
         }
         else
         {
+            // Parent waits for the child
             wait(NULL);
         }
     }
 
     if(isRoot)
     {
-      wait(NULL);
-      exit(0);
+        wait(NULL);
+        exit(0);
     }
 }
 
-
+/*
+ * Name: InterpretCommand
+ *
+ * Description: Interprets and executes either single or multiple commands 
+ *
+ */
 void InterpretCommand(const Command cmd)
 {
     Pgm *pgm = cmd.pgm;
     pid_t pid;
 
+    // Check for a possible output stream and create it
     if(cmd.rstdout != NULL)
-      OUTPUT_FD = creat(cmd.rstdout, O_WRONLY);
+        OUTPUT_FD = creat(cmd.rstdout, O_WRONLY);
+
+    // Check for possible input stream and assign it
     if(cmd.rstdin != NULL)
     {
-      mode_t mode = O_RDONLY;
-      INPUT_FD = open(cmd.rstdin, mode);
+        mode_t mode = O_RDONLY;
+        INPUT_FD = open(cmd.rstdin, mode);
     }
 
-
+    // If command is "cd" then manually execute chdir
     if(strstr(pgm->pgmlist[0], "cd") != NULL)
     {
-      chdir(pgm->pgmlist[1]);
+        chdir(pgm->pgmlist[1]);
     }
+    // Check for "exit" command, if so, terminate the process
     else if(strstr(pgm->pgmlist[0], "exit") != NULL)
     {
-      exit(0);
+        exit(0);
     }
     // Check if it's a single command
     else if(pgm->next == NULL)
@@ -237,13 +276,16 @@ void InterpretCommand(const Command cmd)
                 }
                 else
                 {
+                    // Terminate the parent process
                     exit(0);
                 }
             }
             else
             {
+                // Handle possible input and/or output streams
                 dup2(INPUT_FD, 0);
                 dup2(OUTPUT_FD, 1);
+
                 // If it is not running in the background we just execute it in the child process
                 execv(GetCommandPath(pgm->pgmlist[0]), pgm->pgmlist);
             }
@@ -254,23 +296,26 @@ void InterpretCommand(const Command cmd)
             wait(NULL);
         }
     }
+    // There where multiple commands, run them recursively
     else
     {
-          pid_t pid = fork();
+        // Fork a new process and make it run the recursive function
+        pid_t pid = fork();
 
-          if(pid == 0)
-          {
-              PipeCommands(cmd.pgm, 1, cmd.background);
-          }
-          else
-          {
-              wait(NULL);
-          }
-      }
+        if(pid == 0)
+        {
+            PipeCommands(cmd.pgm, 1, cmd.background);
+        }
+        else
+        {
+            // The parent waits for the process
+            wait(NULL);
+        }
+    }
 
-      // Reset Input and Output file descriptors
-      INPUT_FD = 0;
-      OUTPUT_FD = 1;
+    // Reset Input and Output file descriptors
+    INPUT_FD = 0;
+    OUTPUT_FD = 1;
 }
 
 /*
@@ -298,9 +343,6 @@ char *GetCommandPath(const char *binaryFile)
 
     // Add the binary file to search
     strcat(whereIsCommand, binaryFile);
-
-    // End the string
-    //strcat(whereIsCommand, "\0");
 
     // Open a pipe and run the command in read mode
     binPipe = popen(whereIsCommand, "r");
@@ -363,39 +405,8 @@ void ParsePath()
         *ptr = ' ';
     }
 
-    /*ptr = strstr(tempPath, "\0");
-
-    memmove(ptr, ptr + 1, strlen(tempPath));*/
-
+    // Write the environment path on the global variable
     PATH = tempPath;
-}
-
-
-/*
- * Name: RunCommands
- *
- * RECURSIVE
- *
- * Description: Navigate through the Command structure and execute
- *
- */
-char *RunSingleCommand(Pgm *pgm, int isBackgroundProcess)
-{
-    char *path = GetCommandPath(pgm->pgmlist[0]);
-
-    int pid = fork();
-
-    if(pid == 0)
-    {
-        execv(path, pgm->pgmlist);
-    }
-    else
-    {
-        if(isBackgroundProcess == 0)
-        {
-            wait(NULL);
-        }
-    }
 }
 
 /*
