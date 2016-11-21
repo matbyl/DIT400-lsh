@@ -30,6 +30,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <signal.h>
 
 // Constants
 static const char WHEREIS_PATH[] = "/usr/bin/whereis -b -B ";
@@ -40,8 +41,8 @@ static const char WHEREIS_PATH[] = "/usr/bin/whereis -b -B ";
 // Globals
 char *PATH;
 
-int MAIN_PROCESS;
-int CURRENT_PROCESS;
+pid_t MAIN_PROCESS;
+pid_t CURRENT_PROCESS;
 
 /*
  * Function declarations
@@ -237,7 +238,7 @@ void InterpretCommand(const Command cmd)
 
     // Check for a possible output stream and create it
     if(cmd.rstdout != NULL)
-        OUTPUT_FD = creat(cmd.rstdout, O_WRONLY);
+        OUTPUT_FD = creat(cmd.rstdout, O_WRONLY | S_IRWXU);
 
     // Check for possible input stream and assign it
     if(cmd.rstdin != NULL)
@@ -269,19 +270,25 @@ void InterpretCommand(const Command cmd)
             // process lsh from waiting
             if(cmd.background == 1)
             {
+                pid = fork();
+
                 // Make grandchild process run the command
-                if((pid = fork()) == 0)
+                if(pid == 0)
                 {
                     execv(GetCommandPath(pgm->pgmlist[0]), pgm->pgmlist);
                 }
                 else
                 {
                     // Terminate the parent process
-                    exit(0);
+                    exit(0);                    
                 }
             }
             else
             {
+
+                // Save process id
+                CURRENT_PROCESS = getpid();
+                
                 // Handle possible input and/or output streams
                 dup2(INPUT_FD, 0);
                 dup2(OUTPUT_FD, 1);
@@ -292,6 +299,8 @@ void InterpretCommand(const Command cmd)
         }
         else
         {
+            
+
             // wait for all the child processes to finish
             wait(NULL);
         }
@@ -359,24 +368,28 @@ char *GetCommandPath(const char *binaryFile)
     // Close the pipe
     pclose(binPipe);
 
-    // Whereis returns path in the format ls: /bin/ls
-    // We need to truncate "ls: "
-    char *ptr = strstr(path, ":");
-
-    if(ptr != NULL)
+    // Check if we found a valid path
+    if(strstr(path, "/") != NULL) 
     {
-        // Remove everything before the actual path e.g. "ls: "
-        memmove(&path[0], ptr + 2, strlen(path));
+        // Whereis returns path in the format ls: /bin/ls
+        // We need to truncate "ls: "
+        char *ptr = strstr(path, ":");
+
+        if(ptr != NULL)
+        {
+            // Remove everything before the actual path e.g. "ls: "
+            memmove(&path[0], ptr + 2, strlen(path));
+        }
+        
+        // Get rid of new line and replace with ' '
+        ptr = strstr(path, "\n");
+        *ptr = '\0';    
     }
     else
     {
-        printf("Failed to run command\n");
-        return NULL;
+        printf("%s command not found\n", path);
     }
-
-    // Get rid of new line and replace with ' '
-    ptr = strstr(path, "\n");
-    *ptr = '\0';
+    
 
     // Finally return binary's path
     return path;
@@ -417,8 +430,24 @@ void ParsePath()
  */
 void InteruptHandler(int signal)
 {
-  if(getpid() != MAIN_PROCESS)
-    exit(0);
+
+
+    pid_t pid = getpid();
+
+
+    if(pid != MAIN_PROCESS)
+    {        
+        //printf("PID_current: %d\n", CURRENT_PROCESS );
+        //printf("PID: %d\n", pid );
+
+        if(pid == CURRENT_PROCESS)
+        {
+            exit(0);
+          //  int err = kill(CURRENT_PROCESS, SIGTERM);
+            //printf("Error: %i", err);
+        }
+    }
+            
 }
 
 
