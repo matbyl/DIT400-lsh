@@ -63,8 +63,14 @@ void InteruptHandler(int signal);
 int done = 0;
 
 /* Default in- and output of a command */
-int INPUT_FD = 0;
-int OUTPUT_FD = 1;
+int INPUT_FD;
+int OUTPUT_FD;
+
+void sigchld_handler (int signum)
+{
+  int pid, status;
+  while ((pid = waitpid(WAIT_ANY, &status, WNOHANG)) > 0);
+}
 
 /*
  * Name: main
@@ -74,11 +80,15 @@ int OUTPUT_FD = 1;
  */
 int main(void)
 {
+    INPUT_FD = dup(0);
+    OUTPUT_FD = dup(1);
+
     Command cmd;
     int n;
 
     MAIN_PROCESS = getpid();
     signal(SIGINT, InteruptHandler);
+    signal(SIGCHLD, sigchld_handler);
 
     // Load PATH variable with whitespace separation
     ParsePath();
@@ -161,18 +171,15 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
 
         if(pid == 0)
         {
-            // Check if this is not the original function call 
+            // Check if this is not the original function call
             // This would mean that we still need to write to a pipe, not stdout
             if(!isRoot)
             {
-                // We won't read from this pipe, close that end
-                close(pipeData[READ_END]);
-
                 // Substitute writing end
                 dup2(pipeData[WRITE_END], 1);
             }
             // We are back from all recursive madness, this is the top level
-            else 
+            else
             {
                 // Write to the output file if there is one
                 dup2(OUTPUT_FD, 1);
@@ -181,11 +188,13 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
             // Execute the command
             execv(path, pgm->pgmlist);
         }
-        else if(pid > 0)
+        else
         {
-            // Parent waits for the process
+          if(isRoot)
             wait(NULL);
         }
+
+
     }
     // This is the last command in the linked list
     else
@@ -211,24 +220,14 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
             // Run the command and write output to pipe
             execv(path, pgm->pgmlist);
         }
-        else
-        {
-            // Parent waits for the child
-            wait(NULL);
-        }
     }
 
-    if(isRoot)
-    {
-        wait(NULL);
-        exit(0);
-    }
 }
 
 /*
  * Name: InterpretCommand
  *
- * Description: Interprets and executes either single or multiple commands 
+ * Description: Interprets and executes either single or multiple commands
  *
  */
 void InterpretCommand(const Command cmd)
@@ -266,43 +265,23 @@ void InterpretCommand(const Command cmd)
         // check for child
         if(pid == 0)
         {
-            // If command is a background one, create yet another process to keep the main
-            // process lsh from waiting
-            if(cmd.background == 1)
-            {
-                pid = fork();
+            // Save process id
+            CURRENT_PROCESS = getpid();
 
-                // Make grandchild process run the command
-                if(pid == 0)
-                {
-                    execv(GetCommandPath(pgm->pgmlist[0]), pgm->pgmlist);
-                }
-                else
-                {
-                    // Terminate the parent process
-                    exit(0);                    
-                }
-            }
-            else
-            {
+            // Handle possible input and/or output streams
+            dup2(INPUT_FD, 0);
+            dup2(OUTPUT_FD, 1);
 
-                // Save process id
-                CURRENT_PROCESS = getpid();
-                
-                // Handle possible input and/or output streams
-                dup2(INPUT_FD, 0);
-                dup2(OUTPUT_FD, 1);
-
-                // If it is not running in the background we just execute it in the child process
-                execv(GetCommandPath(pgm->pgmlist[0]), pgm->pgmlist);
-            }
+            // If it is not running in the background we just execute it in the child process
+            execv(GetCommandPath(pgm->pgmlist[0]), pgm->pgmlist);
         }
         else
         {
-            
-
             // wait for all the child processes to finish
-            wait(NULL);
+            if(cmd.background)
+              waitpid(-1, NULL, WNOHANG);
+            else
+              waitpid(-1, NULL, 0);
         }
     }
     // There where multiple commands, run them recursively
@@ -313,19 +292,26 @@ void InterpretCommand(const Command cmd)
 
         if(pid == 0)
         {
+          printf("HERE\n");
             PipeCommands(cmd.pgm, 1, cmd.background);
+        }
+        else if(pid < 0)
+        {
+          printf("Something went wrong during forking\n");
         }
         else
         {
-            // The parent waits for the process
-            wait(NULL);
+          // wait for all the child processes to finish
+          waitpid(-1, NULL, 0);
         }
     }
 
     // Reset Input and Output file descriptors
-    INPUT_FD = 0;
-    OUTPUT_FD = 1;
+    INPUT_FD = dup(0);
+    OUTPUT_FD = dup(1);
 }
+
+
 
 /*
  * Name: GetCommandPath
@@ -369,7 +355,7 @@ char *GetCommandPath(const char *binaryFile)
     pclose(binPipe);
 
     // Check if we found a valid path
-    if(strstr(path, "/") != NULL) 
+    if(strstr(path, "/") != NULL)
     {
         // Whereis returns path in the format ls: /bin/ls
         // We need to truncate "ls: "
@@ -380,19 +366,19 @@ char *GetCommandPath(const char *binaryFile)
             // Remove everything before the actual path e.g. "ls: "
             memmove(&path[0], ptr + 2, strlen(path));
         }
-        
+
         // Get rid of new line and replace with ' '
         ptr = strstr(path, "\n");
-        *ptr = '\0';    
+        *ptr = '\0';
+
+        // Finally return binary's path
+        return path;
     }
     else
     {
         printf("%s command not found\n", path);
     }
-    
 
-    // Finally return binary's path
-    return path;
 }
 
 
@@ -436,7 +422,7 @@ void InteruptHandler(int signal)
 
 
     if(pid != MAIN_PROCESS)
-    {        
+    {
         //printf("PID_current: %d\n", CURRENT_PROCESS );
         //printf("PID: %d\n", pid );
 
@@ -447,7 +433,7 @@ void InteruptHandler(int signal)
             //printf("Error: %i", err);
         }
     }
-            
+
 }
 
 
