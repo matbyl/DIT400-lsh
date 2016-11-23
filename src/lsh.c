@@ -57,7 +57,10 @@ void InterpretCommand(const Command cmd);
 char *GetCommandPath(const char *binaryFile);
 void ParsePath();
 int PipeCommands(Pgm *pgm, int isRoot, int isBackground);
+
 void InteruptHandler(int signal);
+void ChildHandler(int signal);
+
 
 /* When non-zero, this global means the user is done using this program. */
 int done = 0;
@@ -79,6 +82,7 @@ int main(void)
 
     MAIN_PROCESS = getpid();
     signal(SIGINT, InteruptHandler);
+    signal(SIGCHLD, ChildHandler);
 
     // Load PATH variable with whitespace separation
     ParsePath();
@@ -137,6 +141,14 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
 {
     char *path = GetCommandPath(pgm->pgmlist[0]);
     pid_t pid;
+
+    // If true, kill the child and roll back
+    if(path == NULL)
+    {
+        exit(0);
+        printf("HAH! TRICKED YOU!");
+        return 0;
+    }
 
     // Get next command in the list (if there is one)
     Pgm *nextCommand = pgm->next;
@@ -235,6 +247,7 @@ void InterpretCommand(const Command cmd)
 {
     Pgm *pgm = cmd.pgm;
     pid_t pid;
+    char *path;
 
     // Check for a possible output stream and create it
     if(cmd.rstdout != NULL)
@@ -266,43 +279,32 @@ void InterpretCommand(const Command cmd)
         // check for child
         if(pid == 0)
         {
-            // If command is a background one, create yet another process to keep the main
-            // process lsh from waiting
-            if(cmd.background == 1)
-            {
-                pid = fork();
+            // Save process id
+            CURRENT_PROCESS = getpid();
+            
+            // Handle possible input and/or output streams
+            dup2(INPUT_FD, 0);
+            dup2(OUTPUT_FD, 1);
 
-                // Make grandchild process run the command
-                if(pid == 0)
-                {
-                    execv(GetCommandPath(pgm->pgmlist[0]), pgm->pgmlist);
-                }
-                else
-                {
-                    // Terminate the parent process
-                    exit(0);                    
-                }
+            if((path = GetCommandPath(pgm->pgmlist[0])) != NULL)
+            {
+                // If it is not running in the background we just execute it in the child process
+                execv(path, pgm->pgmlist);
             }
             else
             {
-
-                // Save process id
-                CURRENT_PROCESS = getpid();
-                
-                // Handle possible input and/or output streams
-                dup2(INPUT_FD, 0);
-                dup2(OUTPUT_FD, 1);
-
-                // If it is not running in the background we just execute it in the child process
-                execv(GetCommandPath(pgm->pgmlist[0]), pgm->pgmlist);
+                // Command doesn't exist
+                // Murder this child
+                exit(0);
             }
         }
         else
         {
-            
-
-            // wait for all the child processes to finish
-            wait(NULL);
+             // wait for all the child processes to finish
+            if(cmd.background)
+              waitpid(-1, NULL, WNOHANG);
+            else
+              waitpid(-1, NULL, 0);
         }
     }
     // There where multiple commands, run them recursively
@@ -388,6 +390,7 @@ char *GetCommandPath(const char *binaryFile)
     else
     {
         printf("%s command not found\n", path);
+        return NULL;
     }
     
 
@@ -449,6 +452,13 @@ void InteruptHandler(int signal)
     }
             
 }
+
+void ChildHandler(int signal)
+{
+    int pid, status;
+    while ((pid = waitpid(WAIT_ANY, &status, WNOHANG)) > 0);
+}
+
 
 
 /*
