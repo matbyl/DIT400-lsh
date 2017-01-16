@@ -31,6 +31,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
+#include <errno.h>
 
 // Constants
 static const char WHEREIS_PATH[] = "/usr/bin/whereis -b -B ";
@@ -54,8 +55,8 @@ void stripwhite(char *);
 
 // Student
 void InterpretCommand(const Command cmd);
-char *GetCommandPath(const char *binaryFile);
 void ParsePath();
+void ExecuteCommand(Pgm *pgm);
 int PipeCommands(Pgm *pgm, int isRoot, int isBackground);
 
 void InteruptHandler(int signal);
@@ -83,9 +84,6 @@ int main(void)
     MAIN_PROCESS = getpid();
     signal(SIGINT, InteruptHandler);
     signal(SIGCHLD, ChildHandler);
-
-    // Load PATH variable with whitespace separation
-    ParsePath();
 
     while (!done)
     {
@@ -132,6 +130,20 @@ int main(void)
 int pipeData[2];
 
 /*
+ * Name: ExecuteCommand
+ *
+ * Description: Executes command.....
+ */
+void ExecuteCommand(Pgm *pgm)
+{
+	if(execvp(pgm->pgmlist[0], pgm->pgmlist) < 0)
+	{
+		printf("Error: %s \n", strerror(errno));
+		exit(0);
+	}
+}
+
+/*
  * Name: PipeCommands
  *
  * Description: Recursive function used to execute several piped commands
@@ -139,16 +151,7 @@ int pipeData[2];
  */
 int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
 {
-    char *path = GetCommandPath(pgm->pgmlist[0]);
     pid_t pid;
-
-    // If true, kill the child and roll back
-    if(path == NULL)
-    {
-        exit(0);
-        printf("HAH! TRICKED YOU!");
-        return 0;
-    }
 
     // Get next command in the list (if there is one)
     Pgm *nextCommand = pgm->next;
@@ -191,7 +194,8 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
             }
 
             // Execute the command
-            execv(path, pgm->pgmlist);
+            ExecuteCommand(pgm);	
+	
         }
         else if(pid > 0)
         {
@@ -221,7 +225,7 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
             dup2(pipeData[WRITE_END], 1);
 
             // Run the command and write output to pipe
-            execv(path, pgm->pgmlist);
+            ExecuteCommand(pgm);	
         }
         else
         {
@@ -286,17 +290,7 @@ void InterpretCommand(const Command cmd)
             dup2(INPUT_FD, 0);
             dup2(OUTPUT_FD, 1);
 
-            if((path = GetCommandPath(pgm->pgmlist[0])) != NULL)
-            {
-                // If it is not running in the background we just execute it in the child process
-                execv(path, pgm->pgmlist);
-            }
-            else
-            {
-                // Command doesn't exist
-                // Murder this child
-                exit(0);
-            }
+            ExecuteCommand(pgm);
         }
         else
         {
@@ -327,102 +321,6 @@ void InterpretCommand(const Command cmd)
     // Reset Input and Output file descriptors
     INPUT_FD = 0;
     OUTPUT_FD = 1;
-}
-
-/*
- * Name: GetCommandPath
- *
- * Description: Gets the path for a binary program
- *
- */
-char *GetCommandPath(const char *binaryFile)
-{
-    const int bufferSize = 256;
-
-    FILE *binPipe;
-    char *path = malloc(sizeof(char) * bufferSize);
-    char whereIsCommand[bufferSize];
-
-    // Add whereis to command
-    strcpy(whereIsCommand, WHEREIS_PATH);
-
-    // Append the PATH
-    strcat(whereIsCommand, PATH);
-
-    // Append flag
-    strcat(whereIsCommand, " -f ");
-
-    // Add the binary file to search
-    strcat(whereIsCommand, binaryFile);
-
-    // Open a pipe and run the command in read mode
-    binPipe = popen(whereIsCommand, "r");
-
-    if(binPipe == NULL)
-    {
-        printf("Failed to run command\n");
-        return NULL;
-    }
-
-    // Read the contents of the buffer
-    while(fgets(path, bufferSize, binPipe) != NULL) {};
-
-    // Close the pipe
-    pclose(binPipe);
-
-    // Check if we found a valid path
-    if(strstr(path, "/") != NULL) 
-    {
-        // Whereis returns path in the format ls: /bin/ls
-        // We need to truncate "ls: "
-        char *ptr = strstr(path, ":");
-
-        if(ptr != NULL)
-        {
-            // Remove everything before the actual path e.g. "ls: "
-            memmove(&path[0], ptr + 2, strlen(path));
-        }
-        
-        // Get rid of new line and replace with ' '
-        ptr = strstr(path, "\n");
-        *ptr = '\0';    
-    }
-    else
-    {
-        printf("%s command not found\n", path);
-        return NULL;
-    }
-    
-
-    // Finally return binary's path
-    return path;
-}
-
-
-/*
- * Name: ParsePath
- *
- * Description: Gets environment path, removes ':' and writes ' ' instead
- *
- */
-void ParsePath()
-{
-    char *tempPath = getenv("PATH");
-    char *ptr;
-
-    // While there are occurences of ':', write ' '
-    while(1)
-    {
-        ptr = strstr(tempPath, ":");
-
-        if(ptr == NULL)
-            break;
-
-        *ptr = ' ';
-    }
-
-    // Write the environment path on the global variable
-    PATH = tempPath;
 }
 
 /*
@@ -458,8 +356,6 @@ void ChildHandler(int signal)
     int pid, status;
     while ((pid = waitpid(WAIT_ANY, &status, WNOHANG)) > 0);
 }
-
-
 
 /*
  * Name: PrintCommand
