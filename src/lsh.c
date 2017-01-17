@@ -56,7 +56,7 @@ void stripwhite(char *);
 // Student
 void InterpretCommand(const Command cmd);
 void ParsePath();
-void ExecuteCommand(Pgm *pgm);
+int ExecuteCommand(Pgm *pgm);
 int PipeCommands(Pgm *pgm, int isRoot, int isBackground);
 
 void InteruptHandler(int signal);
@@ -134,12 +134,12 @@ int pipeData[2];
  *
  * Description: Executes command.....
  */
-void ExecuteCommand(Pgm *pgm)
+int ExecuteCommand(Pgm *pgm)
 {
 	if(execvp(pgm->pgmlist[0], pgm->pgmlist) < 0)
 	{
 		printf("Error: %s \n", strerror(errno));
-		exit(0);
+		exit(EXIT_FAILURE);
 	}
 }
 
@@ -159,8 +159,13 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
     // Validate next command, and run recursive part if valid
     if(nextCommand != NULL)
     {
-        // Go one level deeper
-        PipeCommands(nextCommand, 0, isBackground);
+        // Go one level deeper, if there is an error we exit
+        if(PipeCommands(nextCommand, 0, isBackground) == EXIT_FAILURE)
+        {
+          printf("Error: unable to execute command\n");
+          exit(0);
+          return -1;
+        }
 
         // We won't write to the pipe, close it
         close(pipeData[WRITE_END]);
@@ -176,7 +181,7 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
 
         if(pid == 0)
         {
-            // Check if this is not the original function call 
+            // Check if this is not the original function call
             // This would mean that we still need to write to a pipe, not stdout
             if(!isRoot)
             {
@@ -187,20 +192,30 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
                 dup2(pipeData[WRITE_END], 1);
             }
             // We are back from all recursive madness, this is the top level
-            else 
+            else
             {
                 // Write to the output file if there is one
                 dup2(OUTPUT_FD, 1);
             }
 
             // Execute the command
-            ExecuteCommand(pgm);	
-	
+            ExecuteCommand(pgm);
+            //exit(-1);
         }
         else if(pid > 0)
         {
-            // Parent waits for the process
-            wait(NULL);
+          int status;
+          if(wait(&status) == -1){
+              printf("Unable to wait for pid\n");
+          }
+
+          if(!isRoot)
+          {
+            if (WIFEXITED(status))
+            {
+                return WEXITSTATUS(status);
+            }
+          }
         }
     }
     // This is the last command in the linked list
@@ -210,6 +225,7 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
         pipe(pipeData);
 
         // Create piped, child process
+        int error;
         pid = fork();
 
         // Child process will run the command
@@ -225,13 +241,18 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
             dup2(pipeData[WRITE_END], 1);
 
             // Run the command and write output to pipe
-            ExecuteCommand(pgm);	
+            ExecuteCommand(pgm);
         }
-        else
-        {
-            // Parent waits for the child
-            wait(NULL);
-        }
+        else if(pid > 0){
+          int status;
+          if(wait(&status) == -1){
+              printf("Unable to wait for pid\n");
+          }
+          if (WIFEXITED(status))
+          {
+              return WEXITSTATUS(status);
+          }
+      }
     }
 
     if(isRoot)
@@ -244,7 +265,7 @@ int PipeCommands(Pgm *pgm, int isRoot, int isBackground)
 /*
  * Name: InterpretCommand
  *
- * Description: Interprets and executes either single or multiple commands 
+ * Description: Interprets and executes either single or multiple commands
  *
  */
 void InterpretCommand(const Command cmd)
@@ -285,7 +306,7 @@ void InterpretCommand(const Command cmd)
         {
             // Save process id
             CURRENT_PROCESS = getpid();
-            
+
             // Handle possible input and/or output streams
             dup2(INPUT_FD, 0);
             dup2(OUTPUT_FD, 1);
@@ -337,7 +358,7 @@ void InteruptHandler(int signal)
 
 
     if(pid != MAIN_PROCESS)
-    {        
+    {
         //printf("PID_current: %d\n", CURRENT_PROCESS );
         //printf("PID: %d\n", pid );
 
@@ -348,7 +369,7 @@ void InteruptHandler(int signal)
             //printf("Error: %i", err);
         }
     }
-            
+
 }
 
 void ChildHandler(int signal)
